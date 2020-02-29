@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -19,10 +20,29 @@ var keyboards []tb.InlineKeyboardMarkup = []tb.InlineKeyboardMarkup{}
 var requestNb int64 = 0
 var radarrToken string
 
+const qualityProfile = 4 // HD 1080p config
+const radarrPath string = "/movies"
+const radarrHost string = "localhost:7878"
+
 type movieData struct {
-	Year  int64  `json:"year"`
-	Title string `json:"title"`
-	ID    int64  `json:"tmdbId"`
+	Year      int64        `json:"year"`
+	Title     string       `json:"title"`
+	ID        int64        `json:"tmdbId"`
+	Quality   int          `json:"qualityProfileId"`
+	TitleSlug string       `json:"titleSlug"`
+	Images    []image      `json:"images"`
+	Path      string       `json:"rootFolderPath"`
+	Monitored bool         `json:"monitored"`
+	Options   movieOptions `json:"addOptions"`
+}
+
+type image struct {
+	CoverType string `json:"coverType"`
+	Url       string `json:"url"`
+}
+
+type movieOptions struct {
+	Search bool `json:"searchForMovie"`
 }
 
 func main() {
@@ -57,15 +77,121 @@ func main() {
 		SearchMovie(b, m)
 	})
 	b.Handle(tb.OnCallback, func(c *tb.Callback) {
-		fmt.Println("wtf")
 		CallbackSearchMovie(b, c)
-	})
-	b.Handle("/test", func(m *tb.Message) {
-		fmt.Println(m.Payload)
 	})
 
 	// Start the bot
 	b.Start()
+}
+
+func SearchMovie(b *tb.Bot, m *tb.Message) {
+	if IsCorrectChatID(m.Chat.ID) {
+		// Get the search term from the message
+		search := m.Payload
+		if search == "" {
+			log.Print("/movies called without movie name")
+			b.Send(m.Sender, "No movie title entered.")
+			return
+		}
+		// Search for the movie through the Radarr API
+		values := make(map[string]string)
+		values["apikey"] = radarrToken
+		values["term"] = search
+		u := NewUrl(radarrHost, "api/movie/lookup", values)
+		response, err := http.Get(u.String())
+		if err != nil {
+			log.Print(err)
+			b.Send(m.Sender, "Failed to search for movies, try again.")
+		}
+		data, _ := ioutil.ReadAll(response.Body)
+		// For all movies returned, extract the ID, name and year
+		movies := []movieData{}
+		json.Unmarshal(data, &movies)
+		// Create the new inline keyboard
+		keyboard := tb.InlineKeyboardMarkup{}
+		// For each movie, create a new button
+		for _, movie := range movies {
+			newButton := NewMovieButton(movie)
+			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, []tb.InlineButton{newButton})
+		}
+		// Return the list of movies to the User
+		b.Send(m.Sender, "Here is the list of movies:", &tb.ReplyMarkup{InlineKeyboard: keyboard.InlineKeyboard})
+		requestNb++
+	}
+}
+
+func CallbackSearchMovie(b *tb.Bot, c *tb.Callback) {
+	// Send an empty response
+	b.Respond(c, &tb.CallbackResponse{})
+	// Extract the movie ID from c.Data
+	// c.Data contains `requestNb|movieID`
+	movieID := strings.Split(c.Data, "|")[1]
+	// Query the Radarr API for the movie information
+	values := make(map[string]string)
+	values["apikey"] = radarrToken
+	values["tmdbId"] = movieID
+	u := NewUrl(radarrHost, "api/movie/lookup/tmdb", values)
+	response, err := http.Get(u.String())
+	if err != nil {
+		log.Print(err)
+		b.Send(c.Sender, "Unable to find the movie, try again.")
+		return
+	}
+	// Extract the movie data
+	data, _ := ioutil.ReadAll(response.Body)
+	movie := movieData{}
+	json.Unmarshal(data, &movie)
+	movie.Monitored = true
+	movie.Options.Search = true
+	movie.Quality = qualityProfile
+	movie.Path = radarrPath
+	// Query the Radarr API to add and search for the movie
+	postValues := make(map[string]string)
+	postValues["apikey"] = radarrToken
+	postUrl := NewUrl(radarrHost, "api/movie", postValues)
+	body, _ := json.Marshal(movie)
+	resp, err := http.Post(postUrl.String(), "application/json", bytes.NewBuffer((body)))
+	// Check if the request went through
+	if err != nil {
+		log.Print(err)
+		b.Send(c.Sender, "Unable to add the movie, try again.")
+		return
+	}
+	// Check if the movie was successfully added
+	code := resp.StatusCode
+	if code != 201 {
+		b.Send(c.Sender, "Movie already added to Radarr.")
+		return
+	} else {
+		b.Send(c.Sender, "Movie added to Radarr, download will start soon.")
+	}
+}
+
+func NewMovieButton(movie movieData) tb.InlineButton {
+	movieName := movie.Title
+	movieYear := movie.Year
+	buttonText := fmt.Sprintf("%s (%d)", movieName, movieYear)
+	movieID := movie.ID
+	newButton := tb.InlineButton{
+		Unique: strconv.FormatInt(requestNb, 10),
+		Text:   buttonText,
+		Data:   strconv.FormatInt(movieID, 10),
+	}
+	return newButton
+}
+
+func NewUrl(host string, path string, values map[string]string) url.URL {
+	u := url.URL{
+		Host:   host,
+		Path:   path,
+		Scheme: "http",
+	}
+	r := url.Values{}
+	for key, value := range values {
+		r.Add(key, value)
+	}
+	u.RawQuery = r.Encode()
+	return u
 }
 
 // IsCorrentChatID returns whether the given chat ID is the same as the one set in PIDARR_CHATID
@@ -76,86 +202,4 @@ func IsCorrectChatID(c int64) bool {
 	} else {
 		return false
 	}
-}
-
-func SearchMovie(b *tb.Bot, m *tb.Message) {
-	if IsCorrectChatID(m.Chat.ID) {
-		// Get the search term from the message
-		search := m.Payload
-		if search == "" {
-			log.Print("/movies called without movie name")
-			b.Send(m.Sender, "No movie title entered")
-			return
-		}
-		// Search for the movie through the Radarr API
-		u := url.URL{
-			Host:   "localhost:7878",
-			Scheme: "http",
-			Path:   "api/movie/lookup",
-		}
-		q := u.Query()
-		q.Add("apikey", radarrToken)
-		q.Add("term", search)
-		u.RawQuery = q.Encode()
-		response, err := http.Get(u.String())
-		if err != nil {
-			log.Fatal(err)
-		}
-		data, _ := ioutil.ReadAll(response.Body)
-		// For all movies returned, extract the ID, name and year
-		movies := []movieData{}
-		json.Unmarshal(data, &movies)
-		// Create the new inline keyboard
-		keyboard := tb.InlineKeyboardMarkup{}
-		// For each movie, create a new button
-		for _, movie := range movies {
-			fmt.Println(movie)
-			movieName := movie.Title
-			movieYear := movie.Year
-			buttonText := fmt.Sprintf("%s (%d)", movieName, movieYear)
-			movieID := movie.ID
-			newButton := tb.InlineButton{
-				Unique: strconv.FormatInt(requestNb, 10),
-				Text:   buttonText,
-				Data:   strconv.FormatInt(movieID, 10),
-			}
-			keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, []tb.InlineButton{newButton})
-		}
-		// Return the list of movies to the User
-		b.Send(m.Sender, "Here is the list of movies:", &tb.ReplyMarkup{InlineKeyboard: keyboard.InlineKeyboard})
-		requestNb++
-	}
-}
-
-func CallbackSearchMovie(b *tb.Bot, c *tb.Callback) {
-	// c.Data contains `requestNb|movieID`
-	fmt.Println(c.Data)
-	// Send an empty response
-	b.Respond(c, &tb.CallbackResponse{})
-	// Extract the movie ID from c.Data
-	movieID := strings.Split(c.Data, "|")[1]
-	// Query the Radarr API for the movie information
-	u := url.URL{
-		Host:   "localhost:7878",
-		Scheme: "http",
-		Path:   "api/movie/lookup/tmdb",
-	}
-	r := u.Query()
-	r.Add("apikey", radarrToken)
-	r.Add("tmdbId", movieID)
-	u.RawQuery = r.Encode()
-	fmt.Println(u.String())
-	response, err := http.Get(u.String())
-	if err != nil {
-		log.Print(err)
-		b.Send(c.Sender, "Unable to find the movie, try again")
-		return
-	}
-	data, _ := ioutil.ReadAll(response.Body)
-	movie := movieData{}
-	json.Unmarshal(data, &movie)
-	fmt.Println(movie)
-	// Query the Radarr API to add and search for the movie
-	// TODO: fix my shit here
-	b.Send(c.Sender, "hello")
 }
