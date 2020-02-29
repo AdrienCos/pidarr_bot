@@ -1,6 +1,6 @@
 # pidarr_bot - A telegram bot to control Pidarr
 
-This telegram bot is designed to be used with (Pidarr)[https://github.com/AdrienCos/pidarr].
+This telegram bot is designed to be used with [Pidarr](https://github.com/AdrienCos/pidarr).
 
 
 To build it, run `make` from the root of the repo.
