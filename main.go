@@ -93,6 +93,7 @@ func SearchMovie(b *tb.Bot, m *tb.Message) {
 			b.Send(m.Sender, "No movie title entered.")
 			return
 		}
+		log.Printf("/movies called with search %s", search)
 		// Search for the movie through the Radarr API
 		values := make(map[string]string)
 		values["apikey"] = radarrToken
@@ -102,11 +103,17 @@ func SearchMovie(b *tb.Bot, m *tb.Message) {
 		if err != nil {
 			log.Print(err)
 			b.Send(m.Sender, "Failed to search for movies, try again.")
+			return
 		}
 		data, _ := ioutil.ReadAll(response.Body)
 		// For all movies returned, extract the ID, name and year
 		movies := []movieData{}
 		json.Unmarshal(data, &movies)
+		log.Printf("Found %d movies matching search", len(movies))
+		if len(movies) == 0 {
+			b.Send(m.Sender, "No movie found for this search.")
+			return
+		}
 		// Create the new inline keyboard
 		keyboard := tb.InlineKeyboardMarkup{}
 		// For each movie, create a new button
@@ -126,6 +133,7 @@ func CallbackSearchMovie(b *tb.Bot, c *tb.Callback) {
 	// Extract the movie ID from c.Data
 	// c.Data contains `requestNb|movieID`
 	movieID := strings.Split(c.Data, "|")[1]
+	log.Printf("Button for movie ID %s clicked", movieID)
 	// Query the Radarr API for the movie information
 	values := make(map[string]string)
 	values["apikey"] = radarrToken
@@ -141,6 +149,7 @@ func CallbackSearchMovie(b *tb.Bot, c *tb.Callback) {
 	data, _ := ioutil.ReadAll(response.Body)
 	movie := movieData{}
 	json.Unmarshal(data, &movie)
+	log.Printf("Found movie corresponding to ID: %s (%d)", movie.Title, movie.Year)
 	movie.Monitored = true
 	movie.Options.Search = true
 	movie.Quality = qualityProfile
@@ -160,9 +169,10 @@ func CallbackSearchMovie(b *tb.Bot, c *tb.Callback) {
 	// Check if the movie was successfully added
 	code := resp.StatusCode
 	if code != 201 {
+		log.Print("Movie already tracked by Radarr")
 		b.Send(c.Sender, "Movie already added to Radarr.")
-		return
 	} else {
+		log.Print("Movie added to Radarr")
 		b.Send(c.Sender, "Movie added to Radarr, download will start soon.")
 	}
 }

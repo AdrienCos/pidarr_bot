@@ -1,8 +1,9 @@
 # Executable
-pidarrBot
+pidarr_bot
 
 # Env file
 conf.env
+conf.sh
 
 # API test file
 test_api.sh
