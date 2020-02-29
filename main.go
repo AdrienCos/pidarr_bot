@@ -19,10 +19,12 @@ import (
 var keyboards []tb.InlineKeyboardMarkup = []tb.InlineKeyboardMarkup{}
 var requestNb int64 = 0
 var radarrToken string
+var radarrHost string
 
 const qualityProfile = 4 // HD 1080p config
 const radarrPath string = "/movies"
-const radarrHost string = "localhost:7878"
+
+// const radarrHost string = "localhost:7878"
 
 type movieData struct {
 	Year      int64        `json:"year"`
@@ -60,6 +62,12 @@ func main() {
 	radarrToken = os.Getenv("RADARR_TOKEN")
 	if radarrToken == "" {
 		log.Fatal("Unable to find the Radarr API token")
+	}
+
+	// Grab the Radarr host/port
+	radarrHost = os.Getenv("RADARR_HOST")
+	if radarrHost == "" {
+		log.Fatal("Unable to find the Radarr host")
 	}
 
 	// Create a new bot
