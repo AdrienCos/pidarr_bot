@@ -1,4 +1,4 @@
-module github.com/AdrienCos/pidarrBot
+module github.com/AdrienCos/pidarr_bot
 
 go 1.13
 
