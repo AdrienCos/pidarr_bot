@@ -11,6 +11,7 @@ import (
 	tb "gopkg.in/tucnak/telebot.v2"
 )
 
+// SearchMovie is the endpoint of `/movies`, it searches for and returns a list of all movies matching the message payload
 func SearchMovie(b *tb.Bot, m *tb.Message, requestNb *int64) {
 	if !helpers.IsCorrectChatID(m.Chat.ID) {
 		log.Print("Bot called from ivalid chat")
@@ -37,11 +38,19 @@ func SearchMovie(b *tb.Bot, m *tb.Message, requestNb *int64) {
 		b.Send(m.Sender, "No movie found for this search.")
 		return
 	}
+	// Query the Radarr API for a list of all movies in the collection
+	collection, err := api.RadarrGetAll()
+	if err != nil {
+		// Do not stop if the query failed
+		log.Print(err)
+	}
 	// Create the new inline keyboard
 	keyboard := tb.InlineKeyboardMarkup{}
 	// For each movie, create a new button
+	var owned bool
 	for _, movie := range movies {
-		newButton := helpers.NewMovieButton(movie, *requestNb)
+		owned = helpers.MovieInCollection(movie, collection)
+		newButton := helpers.NewMovieButton(movie, *requestNb, owned)
 		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, []tb.InlineButton{newButton})
 	}
 	// Return the list of movies to the User
@@ -49,6 +58,7 @@ func SearchMovie(b *tb.Bot, m *tb.Message, requestNb *int64) {
 	*requestNb++
 }
 
+// CallbackSearchMovie is the endpoint for tb.OnCallback, it add the movie (identified by the TMDB ID in the callback data) to the Radarr collection
 func CallbackSearchMovie(b *tb.Bot, c *tb.Callback) {
 	// Send an empty response
 	b.Respond(c, &tb.CallbackResponse{})

@@ -6,8 +6,10 @@ import (
 	"strconv"
 )
 
+// Config is the global bot configuration
 var Config Configuration
 
+// Configuration is a struct that contains all the global configuration options
 type Configuration struct {
 	BotToken      string
 	ChatID        int64
